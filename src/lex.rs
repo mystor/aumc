@@ -4,7 +4,12 @@ use std::iter::Peekable;
 
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteStr(Vec<u8>);
-
+impl ByteStr {
+    fn bytes(&self) -> &[u8] {
+        let ByteStr(ref bytes) = *self;
+        &bytes[..]
+    }
+}
 impl fmt::Debug for ByteStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let ByteStr(ref bytes) = *self;
@@ -229,7 +234,21 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                             _ => Token::Equals
                         }
                     }
-                    b'/' => Token::Slash,
+                    b'/' => {
+                        match self.peek_byte() {
+                            Some(&b'/') => { // Comments
+                                // Skip the comment, and then read another token
+                                loop {
+                                    match self.next_byte() {
+                                        Some(b'\n') | None => break,
+                                        _ => {/* nop */}
+                                    }
+                                }
+                                continue
+                            }
+                            _ => Token::Slash,
+                        }
+                    }
                     b'|' => {
                         match self.peek_byte() {
                             Some(&b'|') => {

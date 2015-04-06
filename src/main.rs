@@ -29,7 +29,7 @@ struct Args {
     flag_out: Option<String>,
     flag_emit: Option<Emit>,
     flag_opt: Option<Opt>,
-    flag_version: bool
+    flag_version: bool,
 }
 
 #[derive(RustcDecodable, Debug)]
@@ -98,6 +98,4 @@ fn main() {
     for token in lexer {
         println!("{:?}", token);
     }
-
-    println!("Hello, World!");
 }
