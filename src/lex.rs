@@ -246,6 +246,22 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                                 }
                                 continue
                             }
+                            Some(&b'*') => {
+                                // Skip the comment, and then read another token
+                                loop {
+                                    match self.next_byte() {
+                                        None => return self.unexpected_eof("while reading multiline comment"),
+                                        Some(b'*') => {
+                                            if let Some(&b'/') = self.peek_byte() {
+                                                self.next_byte();
+                                                break
+                                            }
+                                        },
+                                        _ => {/* nop */}
+                                    }
+                                }
+                                continue
+                            }
                             _ => Token::Slash,
                         }
                     }

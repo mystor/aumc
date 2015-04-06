@@ -1,5 +1,8 @@
 // This is a comment before the main function
 main :: () -> i32 {
+    /* followed
+       by a multiline
+       comment */
     println("Hello, World!");
     // And another comment within it
     return 0;
