@@ -1,0 +1,6 @@
+# Example output files
+*.ll
+*.bc
+*.s
+*.o
+*.out

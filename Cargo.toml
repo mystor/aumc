@@ -1,0 +1,8 @@
+[package]
+name = "aumc"
+version = "0.0.1"
+authors = ["Michael Layzell <michael@thelayzells.com>"]
+
+[dependencies]
+docopt = "0.6"
+rustc-serialize = "0.3"
