@@ -12,6 +12,27 @@ impl fmt::Debug for ByteStr {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Loc {
+    pub line: usize,
+    pub col: usize,
+}
+
+impl fmt::Display for Loc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}, {}", self.line, self.col)
+    }
+}
+
+#[derive(Debug)]
+pub struct Span {
+    pub tok: Token,
+
+    // The start loc is inclusive, but the end loc is not
+    pub start: Loc,
+    pub end: Loc,
+}
+
 #[derive(Debug)]
 pub enum Token {
     // {} () [] < >
@@ -76,28 +97,26 @@ pub enum Token {
 
 pub struct Lexer<T: Iterator<Item = u8>> {
     bytes: Peekable<T>,
-    pub problem: Option<String>,
-    pub line: usize,
-    pub col: usize
+    err: bool,
+    pub loc: Loc,
 }
 
 impl <T: Iterator<Item = u8>> Lexer<T> {
     pub fn new(bytes: T) -> Lexer<T> {
         Lexer {
             bytes: bytes.peekable(),
-            problem: None,
-            line: 1,
-            col: 0
+            err: false,
+            loc: Loc { line: 1, col: 0 }
         }
     }
 
     fn next_byte(&mut self) -> Option<u8> {
         let next = self.bytes.next();
         if let Some(b'\n') = next {
-            self.line += 1;
-            self.col = 0;
+            self.loc.line += 1;
+            self.loc.col = 0;
         } else {
-            self.col += 1;
+            self.loc.col += 1;
         }
         next
     }
@@ -106,27 +125,28 @@ impl <T: Iterator<Item = u8>> Lexer<T> {
         self.bytes.peek()
     }
 
-    fn problem(&mut self, message: &str) -> Option<Token> {
-        self.problem = Some(format!("{} at line {}, column: {}", message, self.line, self.col));
-        None
+    fn problem(&mut self, message: &str) -> Option<Result<Span, String>> {
+        let prob = format!("{} at {}", message, self.loc);
+        self.err = true;
+        Some(Err(prob))
     }
 
-    fn unexpected_eof(&mut self, reason: &str) -> Option<Token> {
-        self.problem(&format!("Unexpected End of File {}", reason));
-        None
+    fn unexpected_eof(&mut self, reason: &str) -> Option<Result<Span, String>> {
+        self.problem(&format!("Unexpected End of File {}", reason))
     }
 }
 
 impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
-    type Item = Token;
+    type Item = Result<Span, String>;
 
-    fn next(&mut self) -> Option<Token> {
-        if self.problem.is_some() { return None } // We ran into a problem lexing
+    fn next(&mut self) -> Option<Result<Span, String>> {
+        if self.err { return None } // We ran into a problem lexing
 
         loop {
-            let next = self.next_byte();
+            let start = self.loc;
 
-            return if let Some(c) = next {
+            let next = self.next_byte();
+            let tok = if let Some(c) = next {
                 match c {
                     // Skip whitespace
                     b' ' | b'\t' | b'\n' => continue,
@@ -307,11 +327,18 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                         }
                     }
 
-                    _ => self.problem(&format!("Illegal byte in input: {:?}", c))
+                    _ => return self.problem(&format!("Illegal byte in input: {:?}", c))
                 }
             } else {
                 None // EOF
-            }
+            };
+            let end = self.loc;
+
+            return tok.map(|tok| Ok(Span {
+                tok: tok,
+                start: start,
+                end: end,
+            }))
         }
     }
 
