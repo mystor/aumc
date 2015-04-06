@@ -151,32 +151,32 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                     // Skip whitespace
                     b' ' | b'\t' | b'\n' => continue,
 
-                    b'{' => Some(Token::LBracket),
-                    b'}' => Some(Token::RBracket),
-                    b'(' => Some(Token::LParen),
-                    b')' => Some(Token::RParen),
-                    b'[' => Some(Token::LBrace),
-                    b']' => Some(Token::RBrace),
+                    b'{' => Token::LBracket,
+                    b'}' => Token::RBracket,
+                    b'(' => Token::LParen,
+                    b')' => Token::RParen,
+                    b'[' => Token::LBrace,
+                    b']' => Token::RBrace,
                     b'<' => {
                         match self.peek_byte() {
                             Some(&b'=') => {
                                 self.next_byte();
-                                Some(Token::Lte)
+                                Token::Lte
                             }
                             Some(&b'-') => {
                                 self.next_byte();
-                                Some(Token::LeftArrow)
+                                Token::LeftArrow
                             }
-                            _ => Some(Token::Lt)
+                            _ => Token::Lt
                         }
                     }
                     b'>' => {
                         match self.peek_byte() {
                             Some(&b'=') => {
                                 self.next_byte();
-                                Some(Token::Gte)
+                                Token::Gte
                             }
-                            _ => Some(Token::Gt)
+                            _ => Token::Gt
                         }
                     }
 
@@ -185,74 +185,74 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                         match self.peek_byte() {
                             Some(&b'=') => {
                                 self.next_byte();
-                                Some(Token::NotEq)
+                                Token::NotEq
                             }
-                            _ => Some(Token::Bang)
+                            _ => Token::Bang
                         }
                     }
-                    b'@' => Some(Token::At),
-                    b'#' => Some(Token::Hash),
-                    b'$' => Some(Token::Dollar),
-                    b'%' => Some(Token::Percent),
-                    b'^' => Some(Token::Caret),
+                    b'@' => Token::At,
+                    b'#' => Token::Hash,
+                    b'$' => Token::Dollar,
+                    b'%' => Token::Percent,
+                    b'^' => Token::Caret,
                     b'&' => {
                         match self.peek_byte() {
                             Some(&b'&') => {
                                 self.next_byte();
-                                Some(Token::AndAnd)
+                                Token::AndAnd
                             }
-                            _ => Some(Token::And)
+                            _ => Token::And
                         }
                     }
-                    b'*' => Some(Token::Star),
+                    b'*' => Token::Star,
                     b'-' => {
                         match self.peek_byte() {
                             Some(&b'>') => {
                                 self.next_byte();
-                                Some(Token::RightArrow)
+                                Token::RightArrow
                             }
-                            _ => Some(Token::Minus)
+                            _ => Token::Minus
                         }
                     }
-                    b'+' => Some(Token::Plus),
-                    b'_' => Some(Token::Underscore),
+                    b'+' => Token::Plus,
+                    b'_' => Token::Underscore,
                     b'=' => {
                         match self.peek_byte() {
                             Some(&b'=') => {
                                 self.next_byte();
-                                Some(Token::EqEq)
+                                Token::EqEq
                             }
                             Some(&b'>') => {
                                 self.next_byte();
-                                Some(Token::FatArrow)
+                                Token::FatArrow
                             }
-                            _ => Some(Token::Equals)
+                            _ => Token::Equals
                         }
                     }
-                    b'/' => Some(Token::Slash),
+                    b'/' => Token::Slash,
                     b'|' => {
                         match self.peek_byte() {
                             Some(&b'|') => {
                                 self.next_byte();
-                                Some(Token::OrOr)
+                                Token::OrOr
                             }
-                            _ => Some(Token::Bar)
+                            _ => Token::Bar
                         }
                     }
-                    b'?' => Some(Token::Qmark),
-                    b',' => Some(Token::Comma),
-                    b'.' => Some(Token::Dot),
-                    b'~' => Some(Token::Tilde),
+                    b'?' => Token::Qmark,
+                    b',' => Token::Comma,
+                    b'.' => Token::Dot,
+                    b'~' => Token::Tilde,
                     b':' => {
                         match self.peek_byte() {
                             Some(&b':') => {
                                 self.next_byte();
-                                Some(Token::ColonColon)
+                                Token::ColonColon
                             }
-                            _ => Some(Token::Colon)
+                            _ => Token::Colon
                         }
                     }
-                    b';' => Some(Token::Semi),
+                    b';' => Token::Semi,
 
                     b'"' => {
                         // Strings
@@ -273,7 +273,7 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                             }
                         }
 
-                        Some(Token::String(ByteStr(val)))
+                        Token::String(ByteStr(val))
                     }
 
                     b'0'...b'9' => { // Numbers
@@ -281,6 +281,9 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                         val.push(c);
                         let mut seen_dot = false;
                         loop {
+                            // TODO(michael): This is a really really terrible
+                            // number parser, which does a bad job
+                            // I should really deal with it much better
                             match self.peek_byte() {
                                 Some(&b'0'...b'9') => {
                                     val.push(self.next_byte().unwrap());
@@ -297,7 +300,7 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                                 _ => break
                             }
                         }
-                        Some(Token::Number(ByteStr(val)))
+                        Token::Number(ByteStr(val))
                     }
 
                     b'a'...b'z' | b'A'...b'Z' => {
@@ -318,23 +321,24 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
 
                         // Screen for keywords
                         match &val[..] {
-                            b"if" => Some(Token::If),
-                            b"else" => Some(Token::Else),
-                            b"struct" => Some(Token::Struct),
-                            b"enum" => Some(Token::Enum),
+                            b"if" => Token::If,
+                            b"else" => Token::Else,
+                            b"struct" => Token::Struct,
+                            b"enum" => Token::Enum,
 
-                            _ => Some(Token::Ident(ByteStr(val)))
+                            _ => Token::Ident(ByteStr(val))
                         }
                     }
 
                     _ => return self.problem(&format!("Illegal byte in input: {:?}", c))
                 }
             } else {
-                None // EOF
+                return None // EOF
             };
             let end = self.loc;
 
-            return tok.map(|tok| Ok(Span {
+            // We've got a token, return it
+            return Some(Ok(Span {
                 tok: tok,
                 start: start,
                 end: end,
