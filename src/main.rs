@@ -1,3 +1,4 @@
+extern crate arena;
 extern crate docopt;
 extern crate rustc_serialize;
 
@@ -6,7 +7,9 @@ use std::fs::File;
 use std::path::PathBuf;
 use docopt::Docopt;
 
+mod common;
 mod lex;
+mod prgm;
 
 // Docopt usage for the program
 static USAGE: &'static str = "
