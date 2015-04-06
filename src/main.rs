@@ -6,12 +6,16 @@ use std::fs::File;
 use std::path::PathBuf;
 use docopt::Docopt;
 
+mod common;
 mod lex;
+mod prgm;
+mod arena;
 
 // Docopt usage for the program
 static USAGE: &'static str = "
 Usage: aumc [options] <INPUT>
        aumc (-h | --help)
+       aumc (-V | --version)
 
 Options:
     -h, --help       Show this screen.
