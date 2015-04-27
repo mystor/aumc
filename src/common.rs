@@ -1,13 +1,17 @@
 use std::fmt;
 
-#[derive(Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct ByteStr(pub Vec<u8>);
-impl ByteStr {
-    pub fn bytes(&self) -> &[u8] {
+
+impl ::std::ops::Deref for ByteStr {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
         let ByteStr(ref bytes) = *self;
         &bytes[..]
     }
 }
+
 impl fmt::Debug for ByteStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let ByteStr(ref bytes) = *self;

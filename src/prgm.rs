@@ -1,4 +1,4 @@
-use arena::Arena;
+use arena::GArena;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -8,48 +8,66 @@ use common::ByteStr;
 pub struct Program<'a> {
     // The global object.
     global: &'a RefCell<Global<'a>>,
-    arena: Arena<'a>,
+
+    arena: GArena,
 }
 impl <'a> Program<'a> {
-    // A wrapper around the arena's alloc method which generates a shared RefCell
-    fn alloc<T, F>(&self, op: F) -> &RefCell<T> where F: FnOnce() -> T {
-        self.arena.alloc(|| RefCell::new(op()))
+    // Safe wrappers around the arena's alloc method
+    fn alloc_block<Ns, Sc>(&self, x: Block<'a, Ns, Sc>) -> &RefCell<Block<'a, Ns, Sc>>
+        where Ns: Namespace<'a>, Sc: Scope<'a> {
+        unsafe { self.arena.alloc(RefCell::new(x)) }
+    }
+
+    fn alloc_function(&self, x: Function<'a>) -> &RefCell<Function<'a>> {
+        unsafe { self.arena.alloc(RefCell::new(x)) }
+    }
+
+    fn alloc_global(&self, x: Global<'a>) -> &RefCell<Global<'a>> {
+        unsafe { self.arena.alloc(RefCell::new(x)) }
     }
 }
 
 /// A namespace contains functions and struct/enum declarations
 /// These pieces of data are stored within the namespace
 pub trait Namespace<'a> {
-    fn lookup_item(&self, name: &[u8]) -> Option<&'a RefCell<Type>>;
+    fn lookup_item(&self, name: &[u8]) -> Option<&'a RefCell<Item>>;
 }
 /// A scope contains local automatic variable declarations
 pub trait Scope<'a> {
-    fn lookup_var_type(&self, name: &[u8]) -> Option<&Option<&'a RefCell<Type>>>;
+    fn lookup_var_type(&self, name: &[u8]) -> Option<Option<&'a RefCell<Type>>>;
 }
 
 /// A scoped block namespace
-pub struct Block<'a> {
+pub struct Block<'a, Ns: Namespace<'a> + 'a, Sc: Scope<'a> + 'a> {
     /// The items in the scope
-    up_ns: Option<&'a RefCell<Namespace<'a>>>,
+    up_ns: Option<&'a RefCell<Ns>>,
     items: HashMap<Vec<u8>, &'a RefCell<Item>>,
 
     /// Statements
     stmts: Vec<Stmt>,
 
     /// Declarations
-    up_scope: Option<&'a RefCell<Scope<'a>>>,
+    up_scope: Option<&'a RefCell<Sc>>,
     decls: HashMap<Vec<u8>, Option<&'a RefCell<Type>>>
 }
-impl <'a> Namespace<'a> for Block<'a> {
+impl <'a, Ns: Namespace<'a>, Sc: Scope<'a>> Namespace<'a> for Block<'a, Ns, Sc> {
     fn lookup_item(&self, name: &[u8]) -> Option<&'a RefCell<Item>> {
-        self.items.get(name).or_else(
-            || self.up_ns.map_or(None, |rc| rc.borrow().lookup_item(name)))
+        self.items.get(name).map_or_else(
+            || self.up_ns.map_or(None, |rc| rc.borrow().lookup_item(name)),
+            |x| Some(*x))
     }
 }
-impl <'a> Scope<'a> for Block<'a> {
-    fn lookup_var_type(&self, name: &[u8]) -> Option<&Option<&'a RefCell<Type>>> {
-        self.decls.get(name).or_else(
-            || self.up_scope.map_or(None, |rc| rc.borrow().lookup_var_type(name)))
+impl <'a, Ns: Namespace<'a>, Sc: Scope<'a>> Scope<'a> for Block<'a, Ns, Sc> {
+    fn lookup_var_type(&self, name: &[u8]) -> Option<Option<&'a RefCell<Type>>> {
+        if let Some(&t) = self.decls.get(name) {
+            Some(t)
+        } else {
+            if let Some(rc) = self.up_scope { // Recurse on up_scope
+                rc.borrow().lookup_var_type(name)
+            } else { // No up scope
+                None
+            }
+        }
     }
 }
 
@@ -59,7 +77,7 @@ pub struct Global<'a> {
 }
 impl <'a> Namespace<'a> for Global<'a> {
     fn lookup_item(&self, name: &[u8]) -> Option<&'a RefCell<Item>> {
-        self.items.get(name)
+        self.items.get(name).map(|x| *x)
     }
 }
 
@@ -68,11 +86,11 @@ pub struct Function<'a> {
     /// Parameters
     params: HashMap<Vec<u8>, Option<&'a RefCell<Type>>>,
     /// Body Block
-    body: &'a RefCell<Block<'a>>
+    body: &'a RefCell<Block<'a, Global<'a>, Function<'a>>>
 }
 impl <'a> Scope<'a> for Function<'a> {
-    fn lookup_var_type(&self, name: &[u8]) -> Option<&Option<&'a RefCell<Type>>> {
-        self.params.get(name)
+    fn lookup_var_type(&self, name: &[u8]) -> Option<Option<&'a RefCell<Type>>> {
+        self.params.get(name).cloned()
     }
 }
 

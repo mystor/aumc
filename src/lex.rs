@@ -3,7 +3,7 @@ use std::iter::Peekable;
 
 use common::{ByteStr, Loc};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Span {
     pub tok: Token,
 
@@ -12,58 +12,24 @@ pub struct Span {
     pub end: Loc,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Token {
-    // {} () [] < >
+    // {} () []
     LBracket,
     RBracket,
     LParen,
     RParen,
     LBrace,
     RBrace,
-    Lt,
-    Gt,
 
-    // ! @ # $ % ^ & * - + _ = / | ? , . ~ : ;
-    Bang,
-    At,
-    Hash,
-    Dollar,
-    Percent,
-    Caret,
-    And,
-    Star,
-    Minus,
-    Plus,
-    Underscore,
-    Equals,
-    Slash,
-    Bar,
-    Qmark,
+    // , : ;
     Comma,
-    Dot,
-    Tilde,
     Colon,
     Semi,
 
-    // Multicharacter tokens
-    // == <= >= !=
-    EqEq,
-    Lte,
-    Gte,
-    NotEq,
-    // && ||
-    AndAnd,
-    OrOr,
-    // ::
-    ColonColon,
-    // ->, <-, =>
-    RightArrow,
-    LeftArrow,
-    FatArrow,
-
     // Compound Tokens
-    Ident(ByteStr), // These _should_ be interned, but they aren't
+    Op(ByteStr),     // These _should_ be interned, but they aren't
+    Ident(ByteStr),  // These _should_ be interned, but they aren't
     Number(ByteStr), // For now, I will store numbers as u8 vectors - I'll deal with the rest later
     String(ByteStr),
 
@@ -113,6 +79,28 @@ impl <T: Iterator<Item = u8>> Lexer<T> {
     fn unexpected_eof(&mut self, reason: &str) -> Option<Result<Span, String>> {
         self.problem(&format!("Unexpected End of File {}", reason))
     }
+
+
+    fn read_op(&mut self, c: u8) -> Token {
+        let mut s = vec![c];
+
+        loop {
+            match self.peek_byte().cloned().unwrap_or(b'\0') {
+                b'<' | b'>' | b'!' | b'@' | b'#' | b'$' | b'%' | b'^' | b'&' | b'*' |
+                b'-' | b'+' | b'_' | b'=' | b'|' | b'?' | b'.' | b'~' | b':' | b'/' => {
+                    s.push(self.next_byte().unwrap());
+                }
+                _ => break
+            }
+        }
+
+        // Screen for special operators
+        match &s[..] {
+            b":" => Token::Colon,
+
+            _ => Token::Op(ByteStr(s)),
+        }
+    }
 }
 
 impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
@@ -136,78 +124,7 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                     b')' => Token::RParen,
                     b'[' => Token::LBrace,
                     b']' => Token::RBrace,
-                    b'<' => {
-                        match self.peek_byte() {
-                            Some(&b'=') => {
-                                self.next_byte();
-                                Token::Lte
-                            }
-                            Some(&b'-') => {
-                                self.next_byte();
-                                Token::LeftArrow
-                            }
-                            _ => Token::Lt
-                        }
-                    }
-                    b'>' => {
-                        match self.peek_byte() {
-                            Some(&b'=') => {
-                                self.next_byte();
-                                Token::Gte
-                            }
-                            _ => Token::Gt
-                        }
-                    }
 
-
-                    b'!' => {
-                        match self.peek_byte() {
-                            Some(&b'=') => {
-                                self.next_byte();
-                                Token::NotEq
-                            }
-                            _ => Token::Bang
-                        }
-                    }
-                    b'@' => Token::At,
-                    b'#' => Token::Hash,
-                    b'$' => Token::Dollar,
-                    b'%' => Token::Percent,
-                    b'^' => Token::Caret,
-                    b'&' => {
-                        match self.peek_byte() {
-                            Some(&b'&') => {
-                                self.next_byte();
-                                Token::AndAnd
-                            }
-                            _ => Token::And
-                        }
-                    }
-                    b'*' => Token::Star,
-                    b'-' => {
-                        match self.peek_byte() {
-                            Some(&b'>') => {
-                                self.next_byte();
-                                Token::RightArrow
-                            }
-                            _ => Token::Minus
-                        }
-                    }
-                    b'+' => Token::Plus,
-                    b'_' => Token::Underscore,
-                    b'=' => {
-                        match self.peek_byte() {
-                            Some(&b'=') => {
-                                self.next_byte();
-                                Token::EqEq
-                            }
-                            Some(&b'>') => {
-                                self.next_byte();
-                                Token::FatArrow
-                            }
-                            _ => Token::Equals
-                        }
-                    }
                     b'/' => {
                         match self.peek_byte() {
                             Some(&b'/') => { // Comments
@@ -236,31 +153,19 @@ impl <T: Iterator<Item = u8>> Iterator for Lexer<T> {
                                 }
                                 continue
                             }
-                            _ => Token::Slash,
-                        }
-                    }
-                    b'|' => {
-                        match self.peek_byte() {
-                            Some(&b'|') => {
-                                self.next_byte();
-                                Token::OrOr
+                            _ => {
+                                self.read_op(b'/') // Not followed by a / or *, so it's an operator
                             }
-                            _ => Token::Bar
                         }
                     }
-                    b'?' => Token::Qmark,
+
+                    // Operators
+                    // '/' is missing, because it is handled above
+                    b'<' | b'>' | b'!' | b'@' | b'#' | b'$' | b'%' | b'^' | b'&' | b'*' |
+                    b'-' | b'+' | b'_' | b'=' | b'|' | b'?' | b'.' | b'~' | b':' => self.read_op(c),
+
+                    // Special non-operator characters
                     b',' => Token::Comma,
-                    b'.' => Token::Dot,
-                    b'~' => Token::Tilde,
-                    b':' => {
-                        match self.peek_byte() {
-                            Some(&b':') => {
-                                self.next_byte();
-                                Token::ColonColon
-                            }
-                            _ => Token::Colon
-                        }
-                    }
                     b';' => Token::Semi,
 
                     b'"' => {

@@ -1,4 +1,3 @@
-extern crate arena;
 extern crate docopt;
 extern crate rustc_serialize;
 
@@ -8,13 +7,17 @@ use std::path::PathBuf;
 use docopt::Docopt;
 
 mod common;
+mod err;
 mod lex;
+mod parse;
 mod prgm;
+mod arena;
 
 // Docopt usage for the program
 static USAGE: &'static str = "
 Usage: aumc [options] <INPUT>
        aumc (-h | --help)
+       aumc (-V | --version)
 
 Options:
     -h, --help       Show this screen.
