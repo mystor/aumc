@@ -103,7 +103,13 @@ fn main() {
         }
     }));
 
-    for token in lexer {
+    // Create the parser
+    let parser = parse::Parser::new(lexer);
+
+    // Parse a single expression
+    parser.parse();
+
+    /* for token in lexer {
         println!("{:?}", token);
-    }
+    } */
 }

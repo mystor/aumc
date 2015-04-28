@@ -1,7 +1,13 @@
 use std::fmt;
+use std::iter::IntoIterator;
 
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct ByteStr(pub Vec<u8>);
+impl ByteStr {
+    fn from<'a, T: IntoIterator<Item = &'a u8>>(slice: T) -> ByteStr {
+        ByteStr(slice.into_iter().cloned().collect())
+    }
+}
 
 impl ::std::ops::Deref for ByteStr {
     type Target = [u8];

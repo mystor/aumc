@@ -1,6 +1,7 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::iter::Peekable;
 use std::mem::swap;
-use std::fmt::Debug;
 
 use err::*;
 use common::{ByteStr, Loc};
@@ -174,17 +175,99 @@ impl OpTreeNode {
 /// The actual parser. This object holds a tokens iterator (for example, Lex), and
 /// will produce expressions when `parse` is called on it.
 /// A program in aum is a list of expressions.
-pub struct Parser<T: Iterator<Item = Span>> {
+pub struct Parser<T: Iterator<Item = AumResult<Span>>> {
     tokens: Peekable<T>,
+
+    operators: HashMap<ByteStr, OpTreeNode>, // Prototypical OpTreeNodes
+
     toplevel: bool,
 }
 
-impl <T: Iterator<Item = Span>> Parser<T> {
+impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
     fn new(it: T) -> Parser<T> {
-        Parser {
+        let parser = Parser {
             tokens: it.peekable(),
+            operators: HashMap::new(),
             toplevel: true, // TODO(michael): Figure out the best way to implement this
-        }
+        };
+
+        // TODO(michael): For now I'm kinda copying Swift's precidence numbers
+        // At some point I may change this to be something else
+        // Dereference-level
+        parser.add_infixl(
+            ByteStr::from(b"."), 300);
+        parser.add_infixl(
+            ByteStr::from(b"->"), 300);
+
+        parser.add_prefix(
+            ByteStr::from(b"&"), 200);
+        parser.add_prefix(
+            ByteStr::from(b"@"), 200);
+
+        parser.add_postfix(
+            ByteStr::from(b"++"), 190);
+        parser.add_postfix(
+            ByteStr::from(b"--"), 190);
+
+        // Multiplicative
+        parser.add_infixl(
+            ByteStr::from(b"*"), 150);
+        parser.add_infixl(
+            ByteStr::from(b"/"), 150);
+
+        // Additive
+        parser.add_infixl(
+            ByteStr::from(b"+"), 140);
+        parser.add_infixl(
+            ByteStr::from(b"-"), 140);
+
+        // Logical
+        // TODO(michael): Traditionally these are non-associative. Maybe add that as an option?
+        parser.add_infixl(
+            ByteStr::from(b"&&"), 120);
+        parser.add_infixl(
+            ByteStr::from(b"||"), 110);
+
+        // TODO(michael): These are assignment operators
+        parser.add_infixl(
+            ByteStr::from(b"::"), 50);
+        parser.add_infixl(
+            ByteStr::from(b":"), 50);
+        parser.add_infixl(
+            ByteStr::from(b"="), 50);
+
+        parser
+    }
+
+    fn add_infixl(&mut self, op: ByteStr, prec: i32) {
+        let key = op.clone();
+        self.operators.insert(key, OpTreeNode::LeftAssoc{
+            op: op,
+            lhs: None,
+            rhs: None,
+        });
+    }
+    fn add_infixr(&mut self, op: ByteStr, prec: i32) {
+        let key = op.clone();
+        self.operators.insert(key, OpTreeNode::RightAssoc{
+            op: op,
+            lhs: None,
+            rhs: None,
+        });
+    }
+    fn add_prefix(&mut self, op: ByteStr, prec: i32) {
+        let key = op.clone();
+        self.operators.insert(key, OpTreeNode::Prefix{
+            op: op,
+            exp: None,
+        });
+    }
+    fn add_postfix(&mut self, op: ByteStr, prec: i32) {
+        let key = op.clone();
+        self.operators.insert(key, OpTreeNode::Postfix{
+            op: op,
+            exp: None,
+        });
     }
 
     /// Peek at the next token in the input stream. Returns only the token (if it is present).
@@ -224,13 +307,14 @@ impl <T: Iterator<Item = Span>> Parser<T> {
 
             match self.peek() {
                 Some(Token::Op(_)) => {
-                    if let Some(Token::Op(bs)) = self.next() {
+                    if let Some(Token::Op(ref bs)) = self.next() {
                         // TODO(michael): Actually implement
-                        try!(append(OpTreeNode::LeftAssoc{
-                            op: bs,
-                            lhs: None,
-                            rhs: None,
-                        }))
+                        let treenode = self.operators.get(bs);
+                        if let Some(tn) = treenode {
+                            try!(append(*tn));
+                        } else {
+                            return aum_err!("Unrecognized operator: {:?}", bs);
+                        }
                     } else {
                         unreachable!()
                     }
