@@ -1,7 +1,7 @@
 pub type AumResult<T> = Result<T, AumErr>;
 
 pub struct AumErr {
-    message: String,
+    pub message: String,
 }
 
 #[macro_export]

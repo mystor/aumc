@@ -1,4 +1,6 @@
 use std::iter::Peekable;
+use std::mem::swap;
+use std::fmt::Debug;
 
 use err::*;
 use common::{ByteStr, Loc};
@@ -6,16 +8,18 @@ use lex::{Token, Span};
 
 // AST nodes
 
-pub trait Expr {
+pub trait Expr: Debug {
     fn a(&self) -> bool { true }
 }
 
+#[derive(Debug)]
 pub struct Assign {
     target: Box<Expr>,
     value: Box<Expr>,
 }
 impl Expr for Assign {}
 
+#[derive(Debug)]
 pub struct Operator2 {
     op: ByteStr,
     lhs: Box<Expr>,
@@ -23,15 +27,149 @@ pub struct Operator2 {
 }
 impl Expr for Operator2 {}
 
+#[derive(Debug)]
 pub struct Param;
+
+#[derive(Debug)]
 pub struct Proc {
     args: Vec<Param>,
     resty: Option<Box<Expr>>,
 }
 impl Expr for Proc {}
 
+#[derive(Debug)]
+enum OpTreeNode { // TODO(michael): Not a super efficient data structure
+    Prefix {
+        op: ByteStr,
+        exp: Option<Box<OpTreeNode>>,
+    },
+    Postfix {
+        op: ByteStr,
+        exp: Option<Box<OpTreeNode>>,
+    },
+    LeftAssoc {
+        op: ByteStr,
+        lhs: Option<Box<OpTreeNode>>,
+        rhs: Option<Box<OpTreeNode>>,
+    },
+    RightAssoc {
+        op: ByteStr,
+        lhs: Option<Box<OpTreeNode>>,
+        rhs: Option<Box<OpTreeNode>>,
+    },
+    Expr {
+        val: Box<Expr>,
+    }
+}
+impl OpTreeNode {
+    fn precidence(&self) -> i32 {
+        unimplemented!()
+    }
 
-enum OpItem { Expr(Box<Expr>), Op(ByteStr) }
+    fn append(&mut self, mut new: Box<OpTreeNode>) -> AumResult<()> {
+        use self::OpTreeNode::*;
+
+        let prec = self.precidence();
+
+        match *self {
+            Prefix{ref mut exp, ..} => {
+                if let Some(ref mut tn) = *exp {
+                    // TODO(michael): Implement more correctly
+                    try!(tn.append(new));
+                } else {
+                    match *new {
+                        Prefix{..} | Expr{..} => *exp = Some(new),
+                        _ => return aum_err!("Prefix expression without body"),
+                    }
+                }
+            }
+
+            Expr{..} | Postfix{..} => {
+                // These values are effectively indivisible
+                match *new {
+                    // Right and left assoc are treated the same because this is
+                    // the initial insertion
+                    RightAssoc{..} | LeftAssoc{..} | Postfix{..} => {
+                        // The new root is the just-read-in value
+                        swap(self, &mut *new);
+                        match *self {
+                            RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                            LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                            Postfix{ref mut exp, ..} => *exp = Some(new),
+                            _ => unreachable!()
+                        }
+                    }
+
+                    Prefix{..} => return aum_err!("Unexpected prefix operator"),
+                    Expr{..} => return aum_err!("Unexpected expression"),
+                }
+            }
+
+            RightAssoc{rhs: None, ..} | LeftAssoc{rhs: None, ..} => {
+                match *new {
+                    Prefix{..} | Expr{..} => {
+                        match *self {
+                            RightAssoc{ref mut rhs, ..} => *rhs = Some(new),
+                            LeftAssoc{ref mut rhs, ..} => *rhs = Some(new),
+                            _ => unreachable!()
+                        }
+                    }
+                    RightAssoc{..} | LeftAssoc{..} =>
+                        return aum_err!("Unexpected infix operator"),
+                    Postfix{..} =>
+                        return aum_err!("Unexpected postfix operator"),
+                }
+            }
+
+            // a + b + c => a + (b + c)
+            RightAssoc{rhs: Some(_), ..} => {
+                if new.precidence() >= prec {
+                    // a $ (b % c)
+                    if let RightAssoc{rhs: Some(ref mut rhs), ..} = *self {
+                        try!(rhs.append(new));
+                    } else { unreachable!() }
+                } else {
+                    // (a $ b) % c
+                    swap(self, &mut *new);
+                    match *self {
+                        Prefix{..} =>
+                            return aum_err!("Unexpected prefix operator"),
+                        Expr{..} =>
+                            return aum_err!("Unexpected expression"),
+                        Postfix{ref mut exp, ..} => *exp = Some(new),
+                        RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                        LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                    }
+                }
+            }
+
+            // a + b + c => (a + b) + c
+            LeftAssoc{rhs: Some(_), ..} => {
+                if new.precidence() <= prec {
+                    // (a $ b) % c
+                    swap(self, &mut *new);
+                    match *self {
+                        Prefix{..} =>
+                            return aum_err!("Unexpected prefix operator"),
+                        Expr{..} =>
+                            return aum_err!("Unexpected expression"),
+                        Postfix{ref mut exp, ..} => *exp = Some(new),
+                        RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                        LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                    }
+                } else {
+                    // a $ (b % c)
+                    if let LeftAssoc{rhs: Some(ref mut rhs), ..} = *self {
+                        try!(rhs.append(new));
+                    } else { unreachable!() }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 
 /// The actual parser. This object holds a tokens iterator (for example, Lex), and
 /// will produce expressions when `parse` is called on it.
@@ -69,16 +207,33 @@ impl <T: Iterator<Item = Span>> Parser<T> {
         }
     }
 
-    fn parse(&mut self) -> AumResult<Box<Expr>> { self.parse_op() }
+    pub fn parse(&mut self) -> AumResult<Box<Expr>> { self.parse_op() }
 
     fn parse_op(&mut self) -> AumResult<Box<Expr>> {
-        let mut v = Vec::new();
+        let mut tree: Option<OpTreeNode> = None;
 
         loop {
+            let mut append = |ot: OpTreeNode| {
+                if let Some(ref mut t) = tree {
+                    t.append(Box::new(ot))
+                } else {
+                    tree = Some(ot);
+                    Ok(())
+                }
+            };
+
             match self.peek() {
-                Some(Token::Op(ref bs)) => {
-                    self.next();
-                    v.push(OpItem::Op(bs.clone()));
+                Some(Token::Op(_)) => {
+                    if let Some(Token::Op(bs)) = self.next() {
+                        // TODO(michael): Actually implement
+                        try!(append(OpTreeNode::LeftAssoc{
+                            op: bs,
+                            lhs: None,
+                            rhs: None,
+                        }))
+                    } else {
+                        unreachable!()
+                    }
                 }
 
                 Some(Token::LBrace) => { // [subscript]
@@ -92,7 +247,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                 // These are valid end-of-expression characters
                 Some(Token::Colon) |     // :
                 Some(Token::Comma) |     // ,
-                Some(Token::Semi) | // ;
+                Some(Token::Semi) |      // ;
                 Some(Token::RParen) |    // )
                 Some(Token::RBrace) |    // ]
                 Some(Token::RBracket) |  // }
@@ -100,14 +255,14 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                 None => break,
 
                 Some(_) => {
-                    v.push(OpItem::Expr(try!(self.parse_atom())));
+                    try!(append(OpTreeNode::Expr{ val: try!(self.parse_atom()) }));
                 }
             }
         }
 
-        unimplemented!()
+        println!("RESULT: {:?}", tree);
 
-        // TODO(michael): Use precidence values to fold the expression correctly
+        unimplemented!()
     }
 
     /// Atoms are any non-operator items!

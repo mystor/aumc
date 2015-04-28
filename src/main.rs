@@ -6,8 +6,10 @@ use std::fs::File;
 use std::path::PathBuf;
 use docopt::Docopt;
 
-mod common;
+#[macro_use]
 mod err;
+
+mod common;
 mod lex;
 mod parse;
 mod prgm;
