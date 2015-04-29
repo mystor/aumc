@@ -4,57 +4,74 @@ use std::iter::Peekable;
 use std::mem::swap;
 
 use err::*;
-use common::{ByteStr, Loc};
+use common::{ByteStr, Loc, PrettyPrint};
 use lex::{Token, Span};
 
 // AST nodes
 
-pub trait Expr: Debug {
-    fn a(&self) -> bool { true }
+pub trait Expr: Debug + PrettyPrint {
+    fn clone_expr(&self) -> Box<Expr>;
 }
 
-#[derive(Debug)]
-pub struct Assign {
-    target: Box<Expr>,
-    value: Box<Expr>,
+impl Clone for Box<Expr> {
+    fn clone(&self) -> Box<Expr> {
+        self.clone_expr()
+    }
 }
-impl Expr for Assign {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct Ident {
+    name: ByteStr,
+}
+impl PrettyPrint for Ident {
+    fn pprint(&self) -> String {
+        format!("{}", self.name)
+    }
+}
+impl Expr for Ident {
+    fn clone_expr(&self) -> Box<Expr> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Operator2 {
     op: ByteStr,
     lhs: Box<Expr>,
     rhs: Box<Expr>,
 }
-impl Expr for Operator2 {}
-
-#[derive(Debug)]
-pub struct Param;
-
-#[derive(Debug)]
-pub struct Proc {
-    args: Vec<Param>,
-    resty: Option<Box<Expr>>,
+impl PrettyPrint for Operator2 {
+    fn pprint(&self) -> String {
+        format!("({} {} {})", self.lhs.pprint(), self.op, self.rhs.pprint())
+    }
 }
-impl Expr for Proc {}
+impl Expr for Operator2 {
+    fn clone_expr(&self) -> Box<Expr> {
+        Box::new(self.clone())
+    }
+}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum OpTreeNode { // TODO(michael): Not a super efficient data structure
     Prefix {
         op: ByteStr,
+        prec: i32,
         exp: Option<Box<OpTreeNode>>,
     },
     Postfix {
         op: ByteStr,
+        prec: i32,
         exp: Option<Box<OpTreeNode>>,
     },
     LeftAssoc {
         op: ByteStr,
+        prec: i32,
         lhs: Option<Box<OpTreeNode>>,
         rhs: Option<Box<OpTreeNode>>,
     },
     RightAssoc {
         op: ByteStr,
+        prec: i32,
         lhs: Option<Box<OpTreeNode>>,
         rhs: Option<Box<OpTreeNode>>,
     },
@@ -64,7 +81,13 @@ enum OpTreeNode { // TODO(michael): Not a super efficient data structure
 }
 impl OpTreeNode {
     fn precidence(&self) -> i32 {
-        unimplemented!()
+        match *self {
+            OpTreeNode::Prefix{prec, ..} => prec,
+            OpTreeNode::Postfix{prec, ..} => prec,
+            OpTreeNode::LeftAssoc{prec, ..} => prec,
+            OpTreeNode::RightAssoc{prec, ..} => prec,
+            OpTreeNode::Expr{..} => ::std::i32::MAX,
+        }
     }
 
     fn append(&mut self, mut new: Box<OpTreeNode>) -> AumResult<()> {
@@ -73,14 +96,38 @@ impl OpTreeNode {
         let prec = self.precidence();
 
         match *self {
-            Prefix{ref mut exp, ..} => {
-                if let Some(ref mut tn) = *exp {
-                    // TODO(michael): Implement more correctly
-                    try!(tn.append(new));
+            Prefix{exp: ref mut exp @ None, ..} => {
+                match *new {
+                    Prefix{..} | Expr{..} => *exp = Some(new),
+                    _ => return aum_err!("Prefix expression without body"),
+                }
+            }
+            Prefix{exp: Some(_), ..} => {
+                // TODO(michael): Implement more correctly
+                if new.precidence() > prec {
+                    // Get a reference to the child tree node
+                    // we couldn't do this before because of the other branch of the if
+                    if let Prefix{exp: Some(ref mut tn), ..} = *self {
+                        try!(tn.append(new));
+                    } else { unreachable!() }
                 } else {
+                    // TODO(michael): Cutnpaste from Expr{..} | Postfix{..}
                     match *new {
-                        Prefix{..} | Expr{..} => *exp = Some(new),
-                        _ => return aum_err!("Prefix expression without body"),
+                        // Right and left assoc are treated the same because this is
+                        // the initial insertion
+                        RightAssoc{..} | LeftAssoc{..} | Postfix{..} => {
+                            // The new root is the just-read-in value
+                            swap(self, &mut *new);
+                            match *self {
+                                RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                                LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
+                                Postfix{ref mut exp, ..} => *exp = Some(new),
+                                _ => unreachable!()
+                            }
+                        }
+
+                        Prefix{..} => return aum_err!("Unexpected prefix operator"),
+                        Expr{..} => return aum_err!("Unexpected expression"),
                     }
                 }
             }
@@ -170,12 +217,23 @@ impl OpTreeNode {
         Ok(())
     }
 }
+impl PrettyPrint for OpTreeNode {
+    fn pprint(&self) -> String {
+        match *self {
+            OpTreeNode::LeftAssoc{ref lhs, ref op, ref rhs, ..} => format!("({} {} {})", lhs.pprint(), op, rhs.pprint()),
+            OpTreeNode::RightAssoc{ref lhs, ref op, ref rhs, ..} => format!("({} {} {})", lhs.pprint(), op, rhs.pprint()),
+            OpTreeNode::Prefix{ref exp, ref op, ..} => format!("({} {})", op, exp.pprint()),
+            OpTreeNode::Postfix{ref exp, ref op, ..} => format!("({} {})", exp.pprint(), op),
+            OpTreeNode::Expr{ref val} => format!("{}", val.pprint()),
+        }
+    }
+}
 
 
 /// The actual parser. This object holds a tokens iterator (for example, Lex), and
 /// will produce expressions when `parse` is called on it.
 /// A program in aum is a list of expressions.
-pub struct Parser<T: Iterator<Item = AumResult<Span>>> {
+pub struct Parser<T: Iterator<Item = Span>> {
     tokens: Peekable<T>,
 
     operators: HashMap<ByteStr, OpTreeNode>, // Prototypical OpTreeNodes
@@ -183,9 +241,9 @@ pub struct Parser<T: Iterator<Item = AumResult<Span>>> {
     toplevel: bool,
 }
 
-impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
-    fn new(it: T) -> Parser<T> {
-        let parser = Parser {
+impl <T: Iterator<Item = Span>> Parser<T> {
+    pub fn new(it: T) -> Parser<T> {
+        let mut parser = Parser {
             tokens: it.peekable(),
             operators: HashMap::new(),
             toplevel: true, // TODO(michael): Figure out the best way to implement this
@@ -243,6 +301,7 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::LeftAssoc{
             op: op,
+            prec: prec,
             lhs: None,
             rhs: None,
         });
@@ -251,6 +310,7 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::RightAssoc{
             op: op,
+            prec: prec,
             lhs: None,
             rhs: None,
         });
@@ -259,6 +319,7 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::Prefix{
             op: op,
+            prec: prec,
             exp: None,
         });
     }
@@ -266,6 +327,7 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::Postfix{
             op: op,
+            prec: prec,
             exp: None,
         });
     }
@@ -297,12 +359,15 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
 
         loop {
             let mut append = |ot: OpTreeNode| {
-                if let Some(ref mut t) = tree {
+                let out = if let Some(ref mut t) = tree {
                     t.append(Box::new(ot))
                 } else {
                     tree = Some(ot);
                     Ok(())
-                }
+                };
+
+                println!("PARTIAL: {}", tree.pprint());
+                out
             };
 
             match self.peek() {
@@ -311,7 +376,7 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
                         // TODO(michael): Actually implement
                         let treenode = self.operators.get(bs);
                         if let Some(tn) = treenode {
-                            try!(append(*tn));
+                            try!(append(tn.clone()));
                         } else {
                             return aum_err!("Unrecognized operator: {:?}", bs);
                         }
@@ -344,13 +409,21 @@ impl <T: Iterator<Item = AumResult<Span>>> Parser<T> {
             }
         }
 
-        println!("RESULT: {:?}", tree);
+        println!("RESULT: {}", tree.pprint());
 
         unimplemented!()
     }
 
     /// Atoms are any non-operator items!
     fn parse_atom(&mut self) -> AumResult<Box<Expr>> {
-        unimplemented!()
+        match self.next() {
+            Some(Token::Ident(x)) => {
+                Ok(Box::new(Ident{
+                    name: x.clone()
+                }))
+            }
+            Some(tok) => aum_err!("Unrecognized token in input stream: {:?}", tok),
+            None => aum_err!("Unexpected EOF while parsing expression"),
+        }
     }
 }

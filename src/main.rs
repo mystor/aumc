@@ -96,7 +96,7 @@ fn main() {
     let opt = args.flag_opt.unwrap_or(Opt::Default);
 
     // Call the lexer
-    let lexer = lex::Lexer::new(infile.bytes().map(|r| {
+    let mut lexer = lex::Lexer::new(infile.bytes().map(|r| {
         match r {
             Ok(c) => c,
             Err(e) => panic!("IO error while reading input file: {}", e),
@@ -104,10 +104,15 @@ fn main() {
     }));
 
     // Create the parser
-    let parser = parse::Parser::new(lexer);
+    let mut parser = parse::Parser::new(lexer.map(|r| {
+        match r { // TODO(michael): Maybe handle this a bit better than a thread panic!
+            Ok(t) => t,
+            Err(e) => panic!("Error while lexing: {}", e),
+        }
+    }));
 
     // Parse a single expression
-    parser.parse();
+    println!("parser result: {:?}", parser.parse());
 
     /* for token in lexer {
         println!("{:?}", token);

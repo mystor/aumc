@@ -1,7 +1,15 @@
+use std::fmt;
+
 pub type AumResult<T> = Result<T, AumErr>;
 
 pub struct AumErr {
     pub message: String,
+}
+
+impl fmt::Debug for AumErr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ERROR {}", self.message)
+    }
 }
 
 #[macro_export]
