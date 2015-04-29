@@ -24,7 +24,6 @@ pub enum Token {
 
     // , : ;
     Comma,
-    Colon,
     Semi,
 
     // Compound Tokens
@@ -95,9 +94,7 @@ impl <T: Iterator<Item = u8>> Lexer<T> {
         }
 
         // Screen for special operators
-        match &s[..] {
-            b":" => Token::Colon,
-
+        match &s[..] { // TODO(michael): See if we actually want to have special operators in this sense
             _ => Token::Op(ByteStr(s)),
         }
     }

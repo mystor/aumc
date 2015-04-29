@@ -35,22 +35,40 @@ impl Expr for Ident {
 }
 
 #[derive(Debug, Clone)]
-pub struct Operator2 {
+pub struct BinaryOp {
     op: ByteStr,
     lhs: Box<Expr>,
     rhs: Box<Expr>,
 }
-impl PrettyPrint for Operator2 {
+impl PrettyPrint for BinaryOp {
     fn pprint(&self) -> String {
         format!("({} {} {})", self.lhs.pprint(), self.op, self.rhs.pprint())
     }
 }
-impl Expr for Operator2 {
+impl Expr for BinaryOp {
     fn clone_expr(&self) -> Box<Expr> {
         Box::new(self.clone())
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UnaryOp {
+    op: ByteStr,
+    exp: Box<Expr>,
+}
+impl PrettyPrint for UnaryOp {
+    fn pprint(&self) -> String {
+        format!("({} {})", self.op, self.exp.pprint())
+    }
+}
+impl Expr for UnaryOp {
+    fn clone_expr(&self) -> Box<Expr> {
+        Box::new(self.clone())
+    }
+}
+
+/// This data structure is used internally by the parse_op method during
+/// the parser's run to the true AST based on operator precidences.
 #[derive(Debug, Clone)]
 enum OpTreeNode { // TODO(michael): Not a super efficient data structure
     Prefix {
@@ -216,6 +234,23 @@ impl OpTreeNode {
 
         Ok(())
     }
+
+    fn into_expr(self) -> AumResult<Box<Expr>> {
+        Ok(match self {
+            OpTreeNode::LeftAssoc{lhs, op, rhs, ..} |
+            OpTreeNode::RightAssoc{lhs, op, rhs, ..} => Box::new(BinaryOp{
+                lhs: try!(lhs.unwrap().into_expr()),
+                op: op,
+                rhs: try!(rhs.unwrap().into_expr()), // TODO(michael): This unwrap may not succeed, and should be handled
+            }),
+            OpTreeNode::Prefix{op, exp, ..} |
+            OpTreeNode::Postfix{exp, op, ..} => Box::new(UnaryOp{
+                exp: try!(exp.unwrap().into_expr()), // TODO(michael): This unwrap may not succeed, and should be handled
+                op: op,
+            }),
+            OpTreeNode::Expr{val} => val,
+        })
+    }
 }
 impl PrettyPrint for OpTreeNode {
     fn pprint(&self) -> String {
@@ -293,6 +328,8 @@ impl <T: Iterator<Item = Span>> Parser<T> {
             ByteStr::from(b":"), 50);
         parser.add_infixl(
             ByteStr::from(b"="), 50);
+        parser.add_infixl(
+            ByteStr::from(b":="), 50);
 
         parser
     }
@@ -394,7 +431,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                 }
 
                 // These are valid end-of-expression characters
-                Some(Token::Colon) |     // :
+                // Some(Token::Colon) |     // :
                 Some(Token::Comma) |     // ,
                 Some(Token::Semi) |      // ;
                 Some(Token::RParen) |    // )
@@ -411,19 +448,19 @@ impl <T: Iterator<Item = Span>> Parser<T> {
 
         println!("RESULT: {}", tree.pprint());
 
-        unimplemented!()
+        match tree {
+            Some(otn) => otn.into_expr(),
+            None => aum_err!("Expected expression, instead got token {:?}", self.peek())
+        }
     }
 
     /// Atoms are any non-operator items!
     fn parse_atom(&mut self) -> AumResult<Box<Expr>> {
-        match self.next() {
-            Some(Token::Ident(x)) => {
-                Ok(Box::new(Ident{
-                    name: x.clone()
-                }))
-            }
-            Some(tok) => aum_err!("Unrecognized token in input stream: {:?}", tok),
-            None => aum_err!("Unexpected EOF while parsing expression"),
-        }
+        Ok(match self.next() {
+            Some(Token::Ident(x)) => Box::new(Ident{ name: x.clone() }),
+
+            Some(tok) => return aum_err!("Unrecognized token in input stream: {:?}", tok),
+            None => return aum_err!("Unexpected EOF while parsing expression"),
+        })
     }
 }
