@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
+use std::fmt;
 use std::iter::Peekable;
 use std::mem::swap;
 
@@ -29,9 +30,20 @@ impl PrettyPrint for Ident {
     }
 }
 impl Expr for Ident {
-    fn clone_expr(&self) -> Box<Expr> {
-        Box::new(self.clone())
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
+}
+
+#[derive(Debug, Clone)]
+pub struct Number {
+    val: ByteStr, // TODO(michael): Should this be a ByteStr?
+}
+impl PrettyPrint for Number {
+    fn pprint(&self) -> String {
+        format!("{}", self.val)
     }
+}
+impl Expr for Number {
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
 }
 
 #[derive(Debug, Clone)]
@@ -46,9 +58,7 @@ impl PrettyPrint for BinaryOp {
     }
 }
 impl Expr for BinaryOp {
-    fn clone_expr(&self) -> Box<Expr> {
-        Box::new(self.clone())
-    }
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
 }
 
 #[derive(Debug, Clone)]
@@ -62,8 +72,64 @@ impl PrettyPrint for UnaryOp {
     }
 }
 impl Expr for UnaryOp {
-    fn clone_expr(&self) -> Box<Expr> {
-        Box::new(self.clone())
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
+}
+
+#[derive(Debug, Clone)]
+pub struct VoidType;
+impl PrettyPrint for VoidType {
+    fn pprint(&self) -> String {
+        format!("void")
+    }
+}
+impl Expr for VoidType {
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
+}
+
+#[derive(Debug, Clone)]
+pub struct Procedure {
+    params: Vec<Box<Expr>>,
+    return_ty: Box<Expr>,
+    body: Vec<Box<Expr>>,
+}
+impl PrettyPrint for Procedure {
+    fn pprint(&self) -> String {
+        format!("PLACEHOLDER") // TODO(michael): Complete
+    }
+}
+impl Expr for Procedure {
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
+}
+
+#[derive(Debug, Clone)]
+pub struct Call {
+    callee: Box<Expr>,
+    args: Vec<Box<Expr>>,
+}
+impl PrettyPrint for Call {
+    fn pprint(&self) -> String {
+        let mut s = String::new();
+        for arg in &self.args { s.push_str(&arg.pprint()); s.push_str(","); }
+        format!("{}({})", self.callee.pprint(), s) // TODO(michael): Complete
+    }
+}
+impl Expr for Call {
+    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
+}
+
+#[derive(Debug, Clone)]
+enum OpType {
+    Op{op: ByteStr},
+    Call{args: Vec<Box<Expr>>},
+    Index{args: Vec<Box<Expr>>},
+}
+impl Display for OpType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            OpType::Op{ref op} => write!(f, "{}", op),
+            OpType::Call{ref args} => write!(f, "({:?})", args),
+            OpType::Index{ref args} => write!(f, "[{:?}]", args),
+        }
     }
 }
 
@@ -72,23 +138,23 @@ impl Expr for UnaryOp {
 #[derive(Debug, Clone)]
 enum OpTreeNode { // TODO(michael): Not a super efficient data structure
     Prefix {
-        op: ByteStr,
+        op: OpType,
         prec: i32,
         exp: Option<Box<OpTreeNode>>,
     },
     Postfix {
-        op: ByteStr,
+        op: OpType,
         prec: i32,
         exp: Option<Box<OpTreeNode>>,
     },
     LeftAssoc {
-        op: ByteStr,
+        op: OpType,
         prec: i32,
         lhs: Option<Box<OpTreeNode>>,
         rhs: Option<Box<OpTreeNode>>,
     },
     RightAssoc {
-        op: ByteStr,
+        op: OpType,
         prec: i32,
         lhs: Option<Box<OpTreeNode>>,
         rhs: Option<Box<OpTreeNode>>,
@@ -196,12 +262,18 @@ impl OpTreeNode {
                     } else { unreachable!() }
                 } else {
                     // (a $ b) % c
+
+                    // Ensure that the connection is valid
+                    match *new {
+                        Prefix{..} => return aum_err!("Unexpected prefix operator"),
+                        Expr{..} => return aum_err!("Unexpected expression"),
+                        _ => {}
+                    }
+
                     swap(self, &mut *new);
                     match *self {
-                        Prefix{..} =>
-                            return aum_err!("Unexpected prefix operator"),
-                        Expr{..} =>
-                            return aum_err!("Unexpected expression"),
+                        Prefix{..} => unreachable!(),
+                        Expr{..} => unreachable!(),
                         Postfix{ref mut exp, ..} => *exp = Some(new),
                         RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
                         LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
@@ -213,12 +285,18 @@ impl OpTreeNode {
             LeftAssoc{rhs: Some(_), ..} => {
                 if new.precidence() <= prec {
                     // (a $ b) % c
+
+                    // Ensure that the connection is valid
+                    match *new {
+                        Prefix{..} => return aum_err!("Unexpected prefix operator"),
+                        Expr{..} => return aum_err!("Unexpected expression"),
+                        _ => {}
+                    }
+
                     swap(self, &mut *new);
                     match *self {
-                        Prefix{..} =>
-                            return aum_err!("Unexpected prefix operator"),
-                        Expr{..} =>
-                            return aum_err!("Unexpected expression"),
+                        Prefix{..} => unreachable!(),
+                        Expr{..} => unreachable!(),
                         Postfix{ref mut exp, ..} => *exp = Some(new),
                         RightAssoc{ref mut lhs, ..} => *lhs = Some(new),
                         LeftAssoc{ref mut lhs, ..} => *lhs = Some(new),
@@ -235,20 +313,22 @@ impl OpTreeNode {
         Ok(())
     }
 
+    /// Transform a OpTreeNode structure into an expression
     fn into_expr(self) -> AumResult<Box<Expr>> {
         Ok(match self {
-            OpTreeNode::LeftAssoc{lhs, op, rhs, ..} |
-            OpTreeNode::RightAssoc{lhs, op, rhs, ..} => Box::new(BinaryOp{
+            OpTreeNode::LeftAssoc{lhs, op: OpType::Op{op}, rhs, ..} |
+            OpTreeNode::RightAssoc{lhs, op: OpType::Op{op}, rhs, ..} => Box::new(BinaryOp{
                 lhs: try!(lhs.unwrap().into_expr()),
                 op: op,
                 rhs: try!(rhs.unwrap().into_expr()), // TODO(michael): This unwrap may not succeed, and should be handled
             }),
-            OpTreeNode::Prefix{op, exp, ..} |
-            OpTreeNode::Postfix{exp, op, ..} => Box::new(UnaryOp{
+            OpTreeNode::Prefix{op: OpType::Op{op}, exp, ..} |
+            OpTreeNode::Postfix{exp, op: OpType::Op{op}, ..} => Box::new(UnaryOp{
                 exp: try!(exp.unwrap().into_expr()), // TODO(michael): This unwrap may not succeed, and should be handled
                 op: op,
             }),
             OpTreeNode::Expr{val} => val,
+            _ => unimplemented!(),
         })
     }
 }
@@ -337,7 +417,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
     fn add_infixl(&mut self, op: ByteStr, prec: i32) {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::LeftAssoc{
-            op: op,
+            op: OpType::Op{op: op},
             prec: prec,
             lhs: None,
             rhs: None,
@@ -346,7 +426,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
     fn add_infixr(&mut self, op: ByteStr, prec: i32) {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::RightAssoc{
-            op: op,
+            op: OpType::Op{op: op},
             prec: prec,
             lhs: None,
             rhs: None,
@@ -355,7 +435,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
     fn add_prefix(&mut self, op: ByteStr, prec: i32) {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::Prefix{
-            op: op,
+            op: OpType::Op{op: op},
             prec: prec,
             exp: None,
         });
@@ -363,14 +443,14 @@ impl <T: Iterator<Item = Span>> Parser<T> {
     fn add_postfix(&mut self, op: ByteStr, prec: i32) {
         let key = op.clone();
         self.operators.insert(key, OpTreeNode::Postfix{
-            op: op,
+            op: OpType::Op{op: op},
             prec: prec,
             exp: None,
         });
     }
 
     /// Peek at the next token in the input stream. Returns only the token (if it is present).
-    fn peek(&mut self) -> Option<Token> {
+    fn peek(&mut self) -> Option<Token> { // TODO(michael): Should this return an Option<&Token>?
         self.tokens.peek().map(|&Span{ref tok, ..}| tok.clone())
     }
 
@@ -389,6 +469,26 @@ impl <T: Iterator<Item = Span>> Parser<T> {
         }
     }
 
+    /// A block is a series of expressions seperated by semicolons
+    pub fn parse_block(&mut self) -> AumResult<Vec<Box<Expr>>> {
+        // TODO(michael): Also allow newline-seperated expressions - that would be nice
+        let mut exprs = Vec::new();
+
+        loop {
+            match self.peek() {
+                Some(Token::RParen) | None => break,
+                Some(Token::Semi) => { self.next(); continue },
+                Some(_) => {
+                    exprs.push(try!(self.parse()));
+                    if self.peek() != Some(Token::Semi) { break }
+                }
+            }
+        }
+
+        Ok(exprs)
+    }
+
+    /// Parse a single expression
     pub fn parse(&mut self) -> AumResult<Box<Expr>> { self.parse_op() }
 
     fn parse_op(&mut self) -> AumResult<Box<Expr>> {
@@ -403,35 +503,98 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                     Ok(())
                 };
 
+                // TODO(michael): Get a real logging library to trace this
                 println!("PARTIAL: {}", tree.pprint());
                 out
             };
 
-            match self.peek() {
-                Some(Token::Op(_)) => {
-                    if let Some(Token::Op(ref bs)) = self.next() {
-                        // TODO(michael): Actually implement
-                        let treenode = self.operators.get(bs);
-                        if let Some(tn) = treenode {
-                            try!(append(tn.clone()));
-                        } else {
-                            return aum_err!("Unrecognized operator: {:?}", bs);
-                        }
+            match self.next() {
+                Some(Token::Op(ref bs)) => {
+                    // Look up the operator in the operators table
+                    let treenode = self.operators.get(bs);
+                    if let Some(tn) = treenode {
+                        try!(append(tn.clone()));
                     } else {
-                        unreachable!()
+                        return aum_err!("Unrecognized operator: {:?}", bs);
                     }
                 }
+
+                Some(Token::Ident(id)) => try!(append(OpTreeNode::Expr{ val: Box::new(Ident{ name: id }) })),
+                Some(Token::Number(num)) => try!(append(OpTreeNode::Expr{ val: Box::new(Number{ val: num }) })),
 
                 Some(Token::LBrace) => { // [subscript]
                     unimplemented!()
                 }
 
                 Some(Token::LParen) => { // (fn call)
-                    unimplemented!()
+                    // Get a list of expressions - the actual type of the expression is ambiguous until that point
+                    let mut exp_list = Vec::new();
+
+                    loop {
+                        if Some(Token::RParen) == self.peek() { self.next(); break }
+                        exp_list.push(try!(self.parse()));
+                        match self.next() {
+                            Some(Token::RParen) => break,
+                            Some(Token::Comma) => continue,
+                            Some(x) => return aum_err!("Expected , or ) - instead saw {:?}", x),
+                            None => return aum_err!("Unexpected EOF while parsing expression list ()"),
+                        }
+                    }
+
+                    if let Some(Token::Op(ref o)) = self.peek() {
+                        if &**o == b":" { // TODO(michael): This is nasty
+                            // We're looking at a function declaration, and this is the return type
+                            self.next();
+                            let return_ty = try!(self.parse());
+
+                            if Some(Token::LBracket) != self.next() { return aum_err!("Expected procedure body. Instead found ????"); }
+
+                            let body = try!(self.parse_block());
+
+                            if Some(Token::RBracket) != self.next() { return aum_err!("Expected }} instead found ???"); }
+
+                            try!(append(OpTreeNode::Expr{
+                                val: Box::new(Procedure {
+                                    params: exp_list,
+                                    return_ty: return_ty,
+                                    body: body,
+                                })
+                            }));
+
+                            continue
+                        }
+                    }
+
+                    if Some(Token::LBracket) == self.peek() {
+                        // TODO(michael): Cutnpaste
+                        let body = try!(self.parse_block());
+
+                        if Some(Token::RBracket) != self.next() { return aum_err!("Expected }} instead found ???"); }
+
+                        try!(append(OpTreeNode::Expr{
+                            val: Box::new(Procedure {
+                                params: exp_list,
+                                return_ty: Box::new(VoidType) as Box<Expr>,
+                                body: body,
+                            })
+                        }));
+
+                        continue
+                    }
+
+                    // Check if it is possible to add it as a function call
+                    if let Err(_) = append(OpTreeNode::Postfix{
+                        op: OpType::Call{args: exp_list.clone()},
+                        prec: 100, // TODO(michael): Get the actual precidence of a function call
+                        exp: None,
+                    }) {
+                        assert!(exp_list.len() == 1); // TODO(michael): Support arbitrary tuples
+
+                        try!(append(OpTreeNode::Expr { val: exp_list[0].clone() })) // TODO(michael): See if we can avoid this copy
+                    }
                 }
 
                 // These are valid end-of-expression characters
-                // Some(Token::Colon) |     // :
                 Some(Token::Comma) |     // ,
                 Some(Token::Semi) |      // ;
                 Some(Token::RParen) |    // )
@@ -440,27 +603,13 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                 Some(Token::LBracket) |  // {
                 None => break,
 
-                Some(_) => {
-                    try!(append(OpTreeNode::Expr{ val: try!(self.parse_atom()) }));
-                }
+                Some(a) => return aum_err!("Unexpected token {:?} in input stream", a)
             }
         }
-
-        println!("RESULT: {}", tree.pprint());
 
         match tree {
             Some(otn) => otn.into_expr(),
             None => aum_err!("Expected expression, instead got token {:?}", self.peek())
         }
-    }
-
-    /// Atoms are any non-operator items!
-    fn parse_atom(&mut self) -> AumResult<Box<Expr>> {
-        Ok(match self.next() {
-            Some(Token::Ident(x)) => Box::new(Ident{ name: x.clone() }),
-
-            Some(tok) => return aum_err!("Unrecognized token in input stream: {:?}", tok),
-            None => return aum_err!("Unexpected EOF while parsing expression"),
-        })
     }
 }

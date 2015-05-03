@@ -12,7 +12,7 @@ pub struct Span {
     pub end: Loc,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     // {} () []
     LBracket,

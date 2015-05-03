@@ -3,7 +3,7 @@ main :: () {
     println("Hello, World!");
 }
 
-add :: (x: i32, y: i32) -> i32 {
+add :: (x: i32, y: i32) {
     return x + y;
 }
 
@@ -12,7 +12,7 @@ Column :: struct {
     some : Random;
     fields : Yeah;
 
-    lookup :: (&self, query: String) -> Item {
+    lookup :: (&self, query: String) : Item {
         // Do some lookup stuff
     }
 
