@@ -10,6 +10,7 @@ use docopt::Docopt;
 mod err;
 
 mod common;
+mod ast;
 mod lex;
 mod parse;
 mod prgm;
@@ -112,7 +113,7 @@ fn main() {
     }));
 
     // Parse a single expression
-    println!("parser result: {:?}", parser.parse());
+    println!("parser result: {:?}", parser.parse().map(|x| x.pprint()));
 
     /* for token in lexer {
         println!("{:?}", token);

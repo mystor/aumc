@@ -7,115 +7,7 @@ use std::mem::swap;
 use err::*;
 use common::{ByteStr, Loc, PrettyPrint};
 use lex::{Token, Span};
-
-// AST nodes
-
-pub trait Expr: Debug + PrettyPrint {
-    fn clone_expr(&self) -> Box<Expr>;
-}
-
-impl Clone for Box<Expr> {
-    fn clone(&self) -> Box<Expr> {
-        self.clone_expr()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Ident {
-    name: ByteStr,
-}
-impl PrettyPrint for Ident {
-    fn pprint(&self) -> String {
-        format!("{}", self.name)
-    }
-}
-impl Expr for Ident {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct Number {
-    val: ByteStr, // TODO(michael): Should this be a ByteStr?
-}
-impl PrettyPrint for Number {
-    fn pprint(&self) -> String {
-        format!("{}", self.val)
-    }
-}
-impl Expr for Number {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct BinaryOp {
-    op: ByteStr,
-    lhs: Box<Expr>,
-    rhs: Box<Expr>,
-}
-impl PrettyPrint for BinaryOp {
-    fn pprint(&self) -> String {
-        format!("({} {} {})", self.lhs.pprint(), self.op, self.rhs.pprint())
-    }
-}
-impl Expr for BinaryOp {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnaryOp {
-    op: ByteStr,
-    exp: Box<Expr>,
-}
-impl PrettyPrint for UnaryOp {
-    fn pprint(&self) -> String {
-        format!("({} {})", self.op, self.exp.pprint())
-    }
-}
-impl Expr for UnaryOp {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct VoidType;
-impl PrettyPrint for VoidType {
-    fn pprint(&self) -> String {
-        format!("void")
-    }
-}
-impl Expr for VoidType {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct Procedure {
-    params: Vec<Box<Expr>>,
-    return_ty: Box<Expr>,
-    body: Vec<Box<Expr>>,
-}
-impl PrettyPrint for Procedure {
-    fn pprint(&self) -> String {
-        format!("PLACEHOLDER") // TODO(michael): Complete
-    }
-}
-impl Expr for Procedure {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
-
-#[derive(Debug, Clone)]
-pub struct Call {
-    callee: Box<Expr>,
-    args: Vec<Box<Expr>>,
-}
-impl PrettyPrint for Call {
-    fn pprint(&self) -> String {
-        let mut s = String::new();
-        for arg in &self.args { s.push_str(&arg.pprint()); s.push_str(","); }
-        format!("{}({})", self.callee.pprint(), s) // TODO(michael): Complete
-    }
-}
-impl Expr for Call {
-    fn clone_expr(&self) -> Box<Expr> { Box::new(self.clone()) }
-}
+use ast::*;
 
 #[derive(Debug, Clone)]
 enum OpType {
@@ -328,6 +220,20 @@ impl OpTreeNode {
                 op: op,
             }),
             OpTreeNode::Expr{val} => val,
+
+            // Function calls
+            OpTreeNode::Postfix{exp, op: OpType::Call{args}, ..} =>
+                Box::new(Call{
+                    callee: try!(exp.unwrap().into_expr()),
+                    args: args
+                }),
+
+            // Function calls
+            OpTreeNode::Postfix{exp, op: OpType::Index{args}, ..} =>
+                Box::new(Index{
+                    object: try!(exp.unwrap().into_expr()),
+                    args: args
+                }),
             _ => unimplemented!(),
         })
     }
@@ -508,8 +414,9 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                 out
             };
 
-            match self.next() {
+            match self.peek() {
                 Some(Token::Op(ref bs)) => {
+                    self.next();
                     // Look up the operator in the operators table
                     let treenode = self.operators.get(bs);
                     if let Some(tn) = treenode {
@@ -519,14 +426,47 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                     }
                 }
 
-                Some(Token::Ident(id)) => try!(append(OpTreeNode::Expr{ val: Box::new(Ident{ name: id }) })),
-                Some(Token::Number(num)) => try!(append(OpTreeNode::Expr{ val: Box::new(Number{ val: num }) })),
+                Some(Token::Ident(id)) => {
+                    self.next();
+                    try!(append(OpTreeNode::Expr{ val: Box::new(Ident{ name: id }) }));
+                }
+                Some(Token::Number(num)) => {
+                    self.next();
+                    try!(append(OpTreeNode::Expr{ val: Box::new(Number{ val: num }) }));
+                }
 
                 Some(Token::LBrace) => { // [subscript]
-                    unimplemented!()
+                    self.next();
+
+                    // Get a list of expressions - the actual type of the expression is ambiguous until that point
+                    let mut exp_list = Vec::new();
+
+                    loop {
+                        if Some(Token::RParen) == self.peek() { self.next(); break }
+                        exp_list.push(try!(self.parse()));
+                        match self.next() {
+                            Some(Token::RBrace) => break,
+                            Some(Token::Comma) => continue,
+                            Some(x) => return aum_err!("Expected , or ] - instead saw {:?}", x),
+                            None => return aum_err!("Unexpected EOF while parsing expression list []"),
+                        }
+                    }
+
+                    // Check if it is possible to add it as a function call
+                    if let Err(_) = append(OpTreeNode::Postfix{
+                        op: OpType::Index{args: exp_list.clone()},
+                        prec: 250,
+                        exp: None,
+                    }) {
+                        assert!(exp_list.len() == 1); // TODO(michael): Support arbitrary tuples
+
+                        try!(append(OpTreeNode::Expr { val: exp_list[0].clone() })) // TODO(michael): See if we can avoid this copy
+                    }
                 }
 
                 Some(Token::LParen) => { // (fn call)
+                    self.next();
+
                     // Get a list of expressions - the actual type of the expression is ambiguous until that point
                     let mut exp_list = Vec::new();
 
@@ -585,7 +525,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                     // Check if it is possible to add it as a function call
                     if let Err(_) = append(OpTreeNode::Postfix{
                         op: OpType::Call{args: exp_list.clone()},
-                        prec: 100, // TODO(michael): Get the actual precidence of a function call
+                        prec: 250,
                         exp: None,
                     }) {
                         assert!(exp_list.len() == 1); // TODO(michael): Support arbitrary tuples

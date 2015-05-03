@@ -1,1 +1,1 @@
-x : i32 = y + z
+x : i32 = foo() + (bar() - baz(quxx(a + b), soop))
