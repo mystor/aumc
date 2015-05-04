@@ -228,12 +228,13 @@ impl OpTreeNode {
                     args: args
                 }),
 
-            // Function calls
+            // Indexing
             OpTreeNode::Postfix{exp, op: OpType::Index{args}, ..} =>
                 Box::new(Index{
                     object: try!(exp.unwrap().into_expr()),
                     args: args
                 }),
+
             _ => unimplemented!(),
         })
     }
