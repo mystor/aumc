@@ -114,8 +114,4 @@ fn main() {
 
     // Parse a single expression
     println!("parser result: {:?}", parser.parse().map(|x| x.pprint()));
-
-    /* for token in lexer {
-        println!("{:?}", token);
-    } */
 }

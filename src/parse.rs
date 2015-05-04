@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use std::mem::swap;
 
 use err::*;
-use common::{ByteStr, Loc, PrettyPrint};
+use common::{ByteStr, Loc, PrettyPrint, pprint_iter};
 use lex::{Token, Span};
 use ast::*;
 
@@ -19,8 +19,8 @@ impl Display for OpType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             OpType::Op{ref op} => write!(f, "{}", op),
-            OpType::Call{ref args} => write!(f, "({:?})", args),
-            OpType::Index{ref args} => write!(f, "[{:?}]", args),
+            OpType::Call{ref args} => write!(f, "({})", pprint_iter(args, ", ")),
+            OpType::Index{ref args} => write!(f, "[{}]", pprint_iter(args, ", ")),
         }
     }
 }
@@ -443,7 +443,7 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                     let mut exp_list = Vec::new();
 
                     loop {
-                        if Some(Token::RParen) == self.peek() { self.next(); break }
+                        if Some(Token::RBrace) == self.peek() { self.next(); break }
                         exp_list.push(try!(self.parse()));
                         match self.next() {
                             Some(Token::RBrace) => break,
@@ -454,15 +454,11 @@ impl <T: Iterator<Item = Span>> Parser<T> {
                     }
 
                     // Check if it is possible to add it as a function call
-                    if let Err(_) = append(OpTreeNode::Postfix{
+                    try!(append(OpTreeNode::Postfix{
                         op: OpType::Index{args: exp_list.clone()},
                         prec: 250,
                         exp: None,
-                    }) {
-                        assert!(exp_list.len() == 1); // TODO(michael): Support arbitrary tuples
-
-                        try!(append(OpTreeNode::Expr { val: exp_list[0].clone() })) // TODO(michael): See if we can avoid this copy
-                    }
+                    }));
                 }
 
                 Some(Token::LParen) => { // (fn call)

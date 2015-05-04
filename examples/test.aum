@@ -1,1 +1,1 @@
-x : i32 = foo() + (bar() - baz(quxx(a + b), soop))
+x : i32()[]()[] = foo() + (bar() - baz(quxx(a + b), soop))

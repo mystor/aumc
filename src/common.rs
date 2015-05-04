@@ -47,7 +47,13 @@ pub trait PrettyPrint {
     fn pprint(&self) -> String;
 }
 
-impl <T: PrettyPrint> PrettyPrint for Box<T> {
+impl <T: ?Sized + PrettyPrint> PrettyPrint for Box<T> {
+    fn pprint(&self) -> String {
+        (**self).pprint()
+    }
+}
+
+impl <'a, T: ?Sized + PrettyPrint> PrettyPrint for &'a T {
     fn pprint(&self) -> String {
         (**self).pprint()
     }
@@ -60,4 +66,14 @@ impl <T: PrettyPrint> PrettyPrint for Option<T> {
             None => format!("None"),
         }
     }
+}
+
+pub fn pprint_iter<T: IntoIterator<Item=I>, I: PrettyPrint>(vec: T, sep: &str) -> String {
+    let mut it = vec.into_iter().map(|x| x.pprint());
+    let mut s = it.next().unwrap_or_else(|| String::new());
+    for part in it {
+        s.push_str(sep);
+        s.push_str(&part);
+    }
+    s
 }
